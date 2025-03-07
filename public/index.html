@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Station Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .dashboard {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .current-data {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            max-width: 800px;
+        }
+        .data-point {
+            text-align: center;
+            padding: 20px;
+            width: 40%;
+        }
+        .value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .temp-value {
+            color: #e63946;
+        }
+        .humidity-value {
+            color: #457b9d;
+        }
+        .label {
+            font-size: 18px;
+            color: #555;
+        }
+        .time {
+            font-size: 14px;
+            color: #777;
+        }
+        .chart-container {
+            width: 100%;
+            max-width: 800px;
+            height: 400px;
+        }
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .chart-title {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .time-selector {
+            padding: 5px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Weather Station Dashboard</h1>
+        <p>Real-time weather data visualization with 5-minute averages</p>
+    </div>
+
+    <div class="dashboard">
+        <!-- Current Data Display -->
+        <div class="card current-data">
+            <div class="data-point">
+                <div class="label">Temperature</div>
+                <div id="temp" class="value temp-value">--</div>
+                <div class="label">°C</div>
+            </div>
+            <div class="data-point">
+                <div class="label">Humidity</div>
+                <div id="humidity" class="value humidity-value">--</div>
+                <div class="label">%</div>
+            </div>
+        </div>
+        
+        <!-- Real-time Chart -->
+        <div class="card chart-container">
+            <div class="chart-header">
+                <div class="chart-title">Real-time Data</div>
+                <div>
+                    <label for="realtimeRange">Display last:</label>
+                    <select id="realtimeRange" class="time-selector">
+                        <option value="10">10 minutes</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                    </select>
+                </div>
+            </div>
+            <canvas id="realtimeChart"></canvas>
+        </div>
+        
+        <!-- 5-Minute Averages Chart -->
+        <div class="card chart-container">
+            <div class="chart-header">
+                <div class="chart-title">5-Minute Averages</div>
+                <div>
+                    <label for="historyRange">Display last:</label>
+                    <select id="historyRange" class="time-selector">
+                        <option value="6">6 hours</option>
+                        <option value="12">12 hours</option>
+                        <option value="24" selected>24 hours</option>
+                    </select>
+                </div>
+            </div>
+            <canvas id="averagesChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Connect to Socket.io
+        const socket = io();
+        
+        // Current values
+        let latestTemp = null;
+        let latestHumidity = null;
+        
+        // Data storage for charts
+        const realtimeData = {
+            temperature: [],
+            humidity: [],
+            labels: []
+        };
+        
+        const averageData = {
+            temperature: [],
+            humidity: [],
+            labels: []
+        };
+        
+        // Initialize Charts
+        const realtimeCtx = document.getElementById('realtimeChart').getContext('2d');
+        const realtimeChart = new Chart(realtimeCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Temperature (°C)',
+                        data: [],
+                        borderColor: '#e63946',
+                        backgroundColor: 'rgba(230, 57, 70, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Humidity (%)',
+                        data: [],
+                        borderColor: '#457b9d',
+                        backgroundColor: 'rgba(69, 123, 157, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Temperature (°C)'
+                        },
+                        min: 10,
+                        max: 40
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Humidity (%)'
+                        },
+                        min: 0,
+                        max: 100,
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                }
+            }
+        });
+        
+        const averagesCtx = document.getElementById('averagesChart').getContext('2d');
+        const averagesChart = new Chart(averagesCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Temperature (°C)',
+                        data: [],
+                        borderColor: '#e63946',
+                        backgroundColor: 'rgba(230, 57, 70, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Humidity (%)',
+                        data: [],
+                        borderColor: '#457b9d',
+                        backgroundColor: 'rgba(69, 123, 157, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Temperature (°C)'
+                        },
+                        min: 15,
+                        max: 35
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Humidity (%)'
+                        },
+                        min: 0,
+                        max: 100,
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Socket.io Events
+        socket.on('mqtt-data', (data) => {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            
+            if (data.topic === '/work_group_01/room_temp/temperature') {
+                latestTemp = parseFloat(data.value);
+                document.getElementById('temp').innerText = latestTemp.toFixed(1);
+                
+                // Add to realtime data
+                realtimeData.temperature.push(latestTemp);
+                realtimeData.labels.push(timeString);
+                
+                // Keep only recent data based on selected time range
+                updateRealtimeChartData();
+            } else if (data.topic === '/work_group_01/room_temp/humidity') {
+                latestHumidity = parseFloat(data.value);
+                document.getElementById('humidity').innerText = latestHumidity.toFixed(1);
+                
+                // Add to realtime data
+                realtimeData.humidity.push(latestHumidity);
+                
+                // Only add label if it wasn't already added by temperature
+                if (realtimeData.humidity.length > realtimeData.labels.length) {
+                    realtimeData.labels.push(timeString);
+                    updateRealtimeChartData();
+                }
+            }
+        });
+        
+        socket.on('average-data', (data) => {
+            const timeString = new Date(data.timestamp).toLocaleTimeString();
+            
+            averageData.temperature.push(data.temperature);
+            averageData.humidity.push(data.humidity);
+            averageData.labels.push(timeString);
+            
+            updateAveragesChart();
+        });
+        
+        // Fetch historical average data on load
+        function fetchHistoricalData(hours) {
+            fetch(`/api/history?hours=${hours}`)
+                .then(response => response.json())
+                .then(data => {
+                    // Clear previous data
+                    averageData.temperature = [];
+                    averageData.humidity = [];
+                    averageData.labels = [];
+                    
+                    // Process data
+                    data.forEach(record => {
+                        const date = new Date(record.timestamp);
+                        averageData.temperature.push(record.temperature);
+                        averageData.humidity.push(record.humidity);
+                        averageData.labels.push(date.toLocaleTimeString());
+                    });
+                    
+                    updateAveragesChart();
+                })
+                .catch(error => console.error('Error fetching historical data:', error));
+        }
+        
+        // Update charts functions
+        function updateRealtimeChartData() {
+            const minutes = parseInt(document.getElementById('realtimeRange').value);
+            const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+            
+            // Keep only data within selected time range
+            const cutoffTime = new Date();
+            cutoffTime.setMinutes(cutoffTime.getMinutes() - minutes);
+            
+            // Find index to cut off data
+            let cutoffIndex = 0;
+            if (realtimeData.labels.length > 100) { // Only trim if we have enough data
+                cutoffIndex = Math.max(0, realtimeData.labels.length - 100);
+                
+                realtimeData.temperature = realtimeData.temperature.slice(cutoffIndex);
+                realtimeData.humidity = realtimeData.humidity.slice(cutoffIndex);
+                realtimeData.labels = realtimeData.labels.slice(cutoffIndex);
+            }
+            
+            // Update chart
+            realtimeChart.data.labels = realtimeData.labels;
+            realtimeChart.data.datasets[0].data = realtimeData.temperature;
+            realtimeChart.data.datasets[1].data = realtimeData.humidity;
+            realtimeChart.update();
+        }
+        
+        function updateAveragesChart() {
+            averagesChart.data.labels = averageData.labels;
+            averagesChart.data.datasets[0].data = averageData.temperature;
+            averagesChart.data.datasets[1].data = averageData.humidity;
+            averagesChart.update();
+        }
+        
+        // Event listeners for time range selectors
+        document.getElementById('realtimeRange').addEventListener('change', updateRealtimeChartData);
+        
+        document.getElementById('historyRange').addEventListener('change', function() {
+            const hours = parseInt(this.value);
+            fetchHistoricalData(hours);
+        });
+        
+        // Initial fetch of historical data
+        fetchHistoricalData(24);
+        
+        // Fetch current data
+        fetch('/api/latest')
+            .then(response => response.json())
+            .then(data => {
+                if (data.temperature) {
+                    document.getElementById('temp').innerText = data.temperature.toFixed(1);
+                }
+                if (data.humidity) {
+                    document.getElementById('humidity').innerText = data.humidity.toFixed(1);
+                }
+            })
+            .catch(error => console.error('Error fetching latest data:', error));
+    </script>
+</body>
+</html>
